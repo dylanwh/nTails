@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Built with WiX Toolset v3 (candle.exe + light.exe), which needs only the
+  classic .NET Framework already on any Windows 10/11 install. See
+  wintails/windows-build.bat for the matching app build and
+  wintails/installer/build.bat for how this gets compiled.
+
+  UpgradeCode below must NEVER change once set: it's how Windows Installer
+  recognizes future versions as upgrades of this same product rather than a
+  separate, conflicting install.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*"
+           Name="winTails"
+           Language="1033"
+           Version="0.2.0.0"
+           Manufacturer="dylanwh"
+           UpgradeCode="8E456DD1-467D-4DAF-BF84-F2A2DB3FF973">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Platform="x64" />
+
+    <!-- AllowSameVersionUpgrades: a rebuild at the same Version must still
+         replace what's installed. Without it, installing a fresh build of
+         an unchanged version installs a second copy alongside the first. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of winTails is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Feature Id="ProductFeature" Title="winTails" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+      <ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="LegacyStartMenuCleanup" />
+    </Feature>
+
+    <!-- If "Use for Windows" pointed this user's system proxy at ntails' PAC
+         file, put their own setting back before wintails.exe goes away.
+         Impersonated, because it's a per-user setting; skipped on upgrades,
+         which keep it; and never fails the uninstall. Other users who
+         turned it on get it restored only by turning it off themselves. -->
+    <CustomAction Id="RestoreSystemProxy"
+                  FileKey="WintailsExeFile"
+                  ExeCommand="--restore-system-proxy"
+                  Execute="deferred"
+                  Impersonate="yes"
+                  Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="RestoreSystemProxy" Before="RemoveFiles">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE</Custom>
+    </InstallExecuteSequence>
+  </Product>
+
+  <Fragment>
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <!-- Was "ntails" before 0.2. The ssh config block references
+             ntailsd.exe here by full path, but winTails rewrites that block
+             with its current location every time it runs, so an upgrade
+             only leaves the old path until winTails next starts. -->
+        <Directory Id="INSTALLFOLDER" Name="winTails" />
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="winTails" />
+        <!-- The Start-menu folder before 0.2 (see LegacyStartMenuCleanup). -->
+        <Directory Id="LegacyProgramsFolder" Name="ntails" />
+      </Directory>
+    </Directory>
+  </Fragment>
+
+  <Fragment>
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="StartMenuShortcut" Guid="*" Win64="yes">
+        <Shortcut Id="WintailsStartMenuShortcut"
+                  Name="winTails"
+                  Description="Connect to multiple tailnets at once"
+                  Target="[INSTALLFOLDER]wintails.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="CleanUpApplicationProgramsFolder" On="uninstall" />
+        <!-- Shortcut can't be a KeyPath; this registry value stands in.
+             Unique per shortcut location, or Guid="*" collides with the
+             pre-0.2 one. -->
+        <RegistryValue Root="HKCU" Key="Software\ntails" Name="WinTailsStartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- Upgrades from before 0.2 can leave the old Start-menu folder's
+         shortcut behind (see above); remove it and the folder. -->
+    <DirectoryRef Id="LegacyProgramsFolder">
+      <Component Id="LegacyStartMenuCleanup" Guid="*" Win64="yes">
+        <RemoveFile Id="RemoveLegacyShortcut" Name="winTails.lnk" On="install" />
+        <RemoveFolder Id="RemoveLegacyProgramsFolder" On="install" />
+        <RegistryValue Root="HKCU" Key="Software\ntails" Name="LegacyStartMenuCleanup" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+
+  <Fragment>
+    <!-- All four files install flat into the same directory: wintails.exe
+         finds ntailsd.exe by looking next to itself, and libqrencode.dll /
+         libwinpthread-1.dll must be on the same search path as wintails.exe. -->
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+      <Component Id="NtailsdExe" Guid="*" Win64="yes">
+        <File Id="NtailsdExeFile" Source="$(var.DistDir)\ntailsd.exe" KeyPath="yes" />
+      </Component>
+      <Component Id="WintailsExe" Guid="*" Win64="yes">
+        <File Id="WintailsExeFile" Source="$(var.DistDir)\wintails.exe" KeyPath="yes" />
+      </Component>
+      <Component Id="LibQrencodeDll" Guid="*" Win64="yes">
+        <File Id="LibQrencodeDllFile" Source="$(var.DistDir)\libqrencode.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="LibWinpthreadDll" Guid="*" Win64="yes">
+        <File Id="LibWinpthreadDllFile" Source="$(var.DistDir)\libwinpthread-1.dll" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

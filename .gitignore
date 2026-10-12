@@ -1,0 +1,12 @@
+*.test
+xcuserdata/
+/wintails/dist
+wintails/*.exe
+wintails/ntailsd.exe
+wintails/*.dll
+wintails/*.res.o
+/ntailsd/ntailsd
+.claude/settings.local.json
+ntails.el/*.elc
+/dist
+/site
