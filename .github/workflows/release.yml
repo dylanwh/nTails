@@ -17,7 +17,48 @@ jobs:
           go-version-file: ntailsd/go.mod
       # ntailsd has no cgo dependencies; one Linux runner builds every target.
       - run: ci/build-release.sh "$GITHUB_REF_NAME"
-      - name: Release
-        env:
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ntailsd
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+
+  wintails:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      # Caches the nix store between runs; the first run may compile the
+      # mingw-w64 cross toolchain from source.
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('wintails/shell.nix') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 2G
+      # MSI ProductVersion is numeric a.b.c.d: v0.3.0 becomes 0.3.0.0.
+      - name: Build
+        working-directory: wintails
+        run: |
+          v=${GITHUB_REF_NAME#v}; v=${v%%-*}
+          nix-shell --run "meson setup build --cross-file cross/mingw64.ini -Dversion=$v.0 -Dtag=$GITHUB_REF_NAME && meson compile -C build msi"
+          mkdir -p ../dist
+          cp build/ntails.msi "../dist/ntails-$GITHUB_REF_NAME-windows-amd64.msi"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wintails
+          path: dist/*.msi
+
+  release:
+    needs: [ntailsd, wintails]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - run: cd dist && sha256sum * > SHA256SUMS
+      - env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes
