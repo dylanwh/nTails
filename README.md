@@ -120,6 +120,10 @@ ci/build-release.sh v0.0.0-local   # ntailsd archives for every platform, into d
 wintails cross-compiles too, from `wintails/shell.nix`. The macOS app needs
 Xcode; see `nTails/`.
 
+## Disclaimer
+
+nTails is not affiliated with, endorsed by, or supported by Tailscale Inc.
+
 ## License
 
 [MPL-2.0](https://github.com/dylanwh/nTails/blob/main/LICENSE).
