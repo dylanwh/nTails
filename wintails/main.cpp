@@ -24,8 +24,6 @@
 #include "ssh_config.h"
 #include "system_proxy.h"
 
-#pragma comment(lib, "comctl32.lib")
-
 // Posted after a SignInDialog's WM_NCDESTROY. lParam is a heap std::string*
 // network id, owned by the message. Deferred because DestroyWindow runs
 // WM_NCDESTROY synchronously: erasing the unique_ptr from the close callback

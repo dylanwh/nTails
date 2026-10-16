@@ -112,12 +112,13 @@ Coming soon. Until then, the emacs frontend works on Linux today.
 
 ```
 make build          # ntailsd, for this machine
-ci/build-release.sh v0.0.0-local   # archives for every platform, into dist/
+make msi            # wintails.exe, ntailsd.exe, and ntails.msi, cross-built (needs nix)
+ci/build-release.sh v0.0.0-local   # ntailsd archives for every platform, into dist/
 ```
 
-`ntailsd` is pure Go with no cgo, so one machine cross-compiles all of it. The
-Windows and macOS apps need their own toolchains; see `wintails/` and
-`nTails/`.
+`ntailsd` is pure Go with no cgo, so one machine cross-compiles all of it.
+wintails cross-compiles too, from `wintails/shell.nix`. The macOS app needs
+Xcode; see `nTails/`.
 
 ## License
 

@@ -1,12 +1,13 @@
 *.test
 xcuserdata/
 /wintails/dist
-wintails/*.exe
-wintails/ntailsd.exe
-wintails/*.dll
-wintails/*.res.o
+/wintails/build
 /ntailsd/ntailsd
 .claude/settings.local.json
 ntails.el/*.elc
 /dist
 /site
+/wintails/subprojects/*
+!/wintails/subprojects/*.wrap
+!/wintails/subprojects/packagefiles
+.cache/
