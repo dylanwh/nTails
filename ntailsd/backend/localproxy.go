@@ -12,38 +12,25 @@ import (
 	"strings"
 	"sync/atomic"
 
-	socks5 "github.com/things-go/go-socks5"
+	"tailscale.com/net/socks5"
 )
-
-// noopResolver skips go-socks5's default behavior of resolving the destination
-// FQDN via the system's public DNS before we ever see it
-type noopResolver struct{}
-
-func (noopResolver) Resolve(ctx context.Context, name string) (context.Context, net.IP, error) {
-	return ctx, net.IPv4zero, nil
-}
 
 // Each start* function binds port, which may be PortAuto (0, letting the OS
 // pick), and reports back the actual bound port -- the requested one, or
 // whatever the OS assigned.
 
 func startSOCKSProxy(registry *NetworkRegistry, port int) (stop func(), boundPort int, err error) {
-	srv := socks5.NewServer(
-		socks5.WithResolver(noopResolver{}),
-		socks5.WithDialAndRequest(
-			func(ctx context.Context, network, addr string, req *socks5.Request) (net.Conn, error) {
-				host := req.RawDestAddr.FQDN
-				if host == "" {
-					host = req.RawDestAddr.IP.String()
-				}
-				conn, err := dialViaRegistry(ctx, registry, network, net.JoinHostPort(host, fmt.Sprint(req.RawDestAddr.Port)))
-				if err != nil {
-					log.Printf("socks5: %v", err)
-				}
-				return conn, err
-			},
-		),
-	)
+	// addr arrives exactly as the client sent it, name or IP, so routing by
+	// MagicDNS suffix sees the name.
+	srv := &socks5.Server{
+		Dialer: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			conn, err := dialViaRegistry(ctx, registry, network, addr)
+			if err != nil {
+				log.Printf("socks5: %v", err)
+			}
+			return conn, err
+		},
+	}
 
 	ln, err := listenLocal(port)
 	if err != nil {
