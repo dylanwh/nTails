@@ -1,4 +1,4 @@
-# Cross-builds wintails.exe, ntailsd.exe, and ntails.msi from macOS or Linux:
+# Cross-builds wintails.exe, ntailsd.exe, and wintails.msi from macOS or Linux:
 #   nix-shell
 #   meson setup build --cross-file cross/mingw64.ini
 #   meson compile -C build msi

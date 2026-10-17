@@ -101,7 +101,7 @@ Download `nTails.app` from the [releases page][releases]. It bundles `ntailsd`.
 
 ### Windows
 
-Download `ntails.msi` from the [releases page][releases]. It can even
+Download the winTails installer (`wintails-*.msi`) from the [releases page][releases]. It can even
 auto-configure the proxy for you.
 
 ### Linux
@@ -112,7 +112,7 @@ Coming soon. Until then, the emacs frontend works on Linux today.
 
 ```
 make build          # ntailsd, for this machine
-make msi            # wintails.exe, ntailsd.exe, and ntails.msi, cross-built (needs nix)
+make msi            # wintails.exe, ntailsd.exe, and wintails.msi, cross-built (needs nix)
 ci/build-release.sh v0.0.0-local   # ntailsd archives for every platform, into dist/
 ```
 

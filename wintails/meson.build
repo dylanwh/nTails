@@ -1,7 +1,7 @@
 # Cross-build from macOS or Linux (see shell.nix):
 #   meson setup build --cross-file cross/mingw64.ini
 #   meson compile -C build          # wintails.exe, ntailsd.exe
-#   meson compile -C build msi      # ntails.msi via wixl
+#   meson compile -C build msi      # wintails.msi via wixl
 # Or natively in the MSYS2 mingw64 shell with
 # mingw-w64-x86_64-{gcc,meson,ninja,pkgconf}; the msi target then needs wixl.
 project('wintails', 'c', 'cpp',
@@ -58,9 +58,9 @@ ntailsd = custom_target('ntailsd',
 
 wixl = find_program('wixl', required: false)
 if wixl.found()
-  msi = custom_target('ntails.msi',
+  msi = custom_target('wintails.msi',
     input: 'installer/Product.wxs',
-    output: 'ntails.msi',
+    output: 'wintails.msi',
     command: [wixl, '-a', 'x64',
               '-D', 'DistDir=' + meson.current_build_dir(),
               '-D', 'Version=' + get_option('version'),

@@ -9,15 +9,15 @@ permissions:
 
 jobs:
   ntailsd:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: ntailsd/go.mod
       # ntailsd has no cgo dependencies; one Linux runner builds every target.
       - run: ci/build-release.sh "$GITHUB_REF_NAME"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ntailsd
           path: |
@@ -25,9 +25,9 @@ jobs:
             dist/*.zip
 
   wintails:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: cachix/install-nix-action@v31
       # Caches the nix store between runs; the first run may compile the
       # mingw-w64 cross toolchain from source.
@@ -43,7 +43,7 @@ jobs:
           v=${GITHUB_REF_NAME#v}; v=${v%%-*}
           nix-shell --run "meson setup build --cross-file cross/mingw64.ini -Dversion=$v.0 -Dtag=$GITHUB_REF_NAME && meson compile -C build msi"
           mkdir -p ../dist
-          cp build/ntails.msi "../dist/ntails-$GITHUB_REF_NAME-windows-amd64.msi"
+          cp build/wintails.msi "../dist/wintails-$GITHUB_REF_NAME-windows-amd64.msi"
       - uses: actions/upload-artifact@v4
         with:
           name: wintails
