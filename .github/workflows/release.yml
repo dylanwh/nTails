@@ -44,7 +44,7 @@ jobs:
           nix-shell --run "meson setup build --cross-file cross/mingw64.ini -Dversion=$v.0 -Dtag=$GITHUB_REF_NAME && meson compile -C build msi"
           mkdir -p ../dist
           cp build/wintails.msi "../dist/wintails-$GITHUB_REF_NAME-windows-amd64.msi"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wintails
           path: dist/*.msi
@@ -53,11 +53,10 @@ jobs:
     needs: [ntailsd, wintails]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
-      - run: cd dist && sha256sum * > SHA256SUMS
       - env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
