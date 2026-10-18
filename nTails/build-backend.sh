@@ -37,9 +37,16 @@ cd "${GO_MODULE_DIR}"
 "${GO_BIN}" build -tags ts_omit_portlist,ts_omit_useproxy -o "${TARGET_BIN}" .
 chmod 755 "${TARGET_BIN}"
 
-# Ad-hoc sign the auxiliary binary to satisfy macOS Gatekeeper
+# Sign the auxiliary binary with hardened runtime to satisfy macOS security requirements
 if command -v codesign >/dev/null 2>&1; then
-    codesign --force --sign - --timestamp=none "${TARGET_BIN}" 2>/dev/null || true
+    SIGN_IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:-${CODE_SIGN_IDENTITY:--}}"
+    [ -z "${SIGN_IDENTITY}" ] && SIGN_IDENTITY="-"
+    if [ "${SIGN_IDENTITY}" != "-" ]; then
+        codesign --force --options runtime --sign "${SIGN_IDENTITY}" "${TARGET_BIN}" 2>/dev/null || \
+        codesign --force --options runtime --sign - --timestamp=none "${TARGET_BIN}" 2>/dev/null || true
+    else
+        codesign --force --options runtime --sign - --timestamp=none "${TARGET_BIN}" 2>/dev/null || true
+    fi
 fi
 
 echo "[nTails Build] Successfully bundled ntailsd into ${TARGET_BIN}"

@@ -152,7 +152,8 @@ struct NetworkRowView: View {
                         .foregroundStyle(.secondary)
                 }
                 .menuStyle(.borderlessButton)
-                .frame(width: 24)
+                .menuIndicator(.hidden)
+                .frame(width: 24, height: 24)
             }
         }
         .padding(.vertical, 8)
