@@ -4,7 +4,10 @@ set -e
 # Ensure Go and user tool paths are available in Xcode's build environment
 export PATH="/run/current-system/sw/bin:${HOME}/.nix-profile/bin:/opt/homebrew/bin:/usr/local/bin:${HOME}/.go/bin:${HOME}/go/bin:${PATH}"
 
-if command -v go >/dev/null 2>&1; then
+# Xcode resets PATH for script phases, so CI passes GO_BIN explicitly.
+if [ -n "${GO_BIN:-}" ]; then
+    :
+elif command -v go >/dev/null 2>&1; then
     GO_BIN="$(command -v go)"
 elif [ -x "/run/current-system/sw/bin/go" ]; then
     GO_BIN="/run/current-system/sw/bin/go"

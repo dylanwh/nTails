@@ -19,3 +19,21 @@ jobs:
       - run: go vet ./...
       - run: go test ./...
       - run: CGO_ENABLED=0 go build -o /dev/null .
+
+  ntails-macos:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: ntailsd/go.mod
+          cache-dependency-path: ntailsd/go.sum
+      - name: Build
+        working-directory: nTails
+        env:
+          DEVELOPER_DIR: /Applications/Xcode_27.1.app
+        run: |
+          GO_BIN="$(command -v go)" xcodebuild build -quiet \
+            -project nTails.xcodeproj -scheme nTails -configuration Release \
+            -destination platform=macOS \
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=
