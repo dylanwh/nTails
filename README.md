@@ -95,6 +95,14 @@ Then `M-x ntails-network-list`. `a` adds a tailnet and opens a sign-in buffer
 with a QR code to scan from your phone. The QR code needs the [qrencode][]
 package from GNU ELPA, which package managers install for you.
 
+To send Emacs' own HTTP requests (eww, package.el, and anything else built on
+`url-retrieve`) to hosts on your tailnets through `ntailsd`, the same way the
+PAC file does for browsers:
+
+```elisp
+(setq url-proxy-locator #'ntails-find-proxy-for-url)
+```
+
 ### macOS
 
 Download `nTails.app` from the [releases page][releases]. It bundles `ntailsd`.

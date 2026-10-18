@@ -49,6 +49,15 @@
 ;; a block there routing every known tailnet's domain through `ntailsd
 ;; connect' as ssh's ProxyCommand, so `ssh host.tailnet.ts.net' works.
 ;;
+;; To route Emacs' own `url-retrieve' (eww, package.el, restclient,
+;; ...) onto connected tailnets the way ntailsd's PAC file does for
+;; browsers, point the url library's proxy lookup at this package:
+;;
+;;   (setq url-proxy-locator #'ntails-find-proxy-for-url)
+;;
+;; Hosts under a connected tailnet's domain then go through ntailsd's
+;; HTTP proxy; every other URL is handled as before.
+;;
 ;; The ntails-* functions and hooks are usable on their own for other
 ;; frontends.
 
@@ -108,6 +117,10 @@ data.")
   "Cached `requested' ports from the last `get_settings'/`save_settings'.
 An alist with `socks', `pac', and `http' keys, or nil before the first
 response.")
+
+(defvar ntails--effective-settings nil
+  "The ports ntailsd is using, cached from the last `get_settings'/`save_settings'.
+Same keys as `ntails--settings'; -1 for a listener that is off.")
 
 (defvar ntails--output-buffer nil
   "Internal buffer accumulating not-yet-newline-terminated stdout.")
@@ -261,9 +274,11 @@ CALLBACK, if given, is called with the response alist."
                     (when callback (funcall callback res)))))
 
 (defun ntails--cache-settings (res)
-  "Store RES's `requested' ports in `ntails--settings' if RES is ok."
+  "Store RES's `requested' and `effective' ports if RES is ok."
   (when (eq (alist-get 'ok res) t)
-    (setq ntails--settings (alist-get 'requested (alist-get 'data res)))))
+    (let ((data (alist-get 'data res)))
+      (setq ntails--settings (alist-get 'requested data)
+            ntails--effective-settings (alist-get 'effective data)))))
 
 (defun ntails-get-settings (&optional callback)
   "Request ntailsd's current proxy settings, refreshing `ntails--settings'.
@@ -361,6 +376,39 @@ safe to re-run."
       (make-directory (file-name-directory path) t)
       (write-region new-content nil path))
     (message "Ntails: wrote ssh config block to %s" path)))
+
+;;; url-proxy-locator
+
+(declare-function url-default-find-proxy-for-url "url-proxy" (urlobj host))
+
+(defun ntails--tailnet-host-p (host)
+  "Return non-nil if HOST is under a connected tailnet's domain."
+  (catch 'found
+    (maphash (lambda (_id net)
+               (let ((domain (alist-get 'domain net)))
+                 (when (and domain
+                            (not (string-empty-p domain))
+                            (equal (alist-get 'status net) "connected")
+                            (string-suffix-p (concat "." domain) host t))
+                   (throw 'found t))))
+             ntails--networks)
+    nil))
+
+;;;###autoload
+(defun ntails-find-proxy-for-url (urlobj host)
+  "Route HOST through ntailsd's HTTP proxy if it is on a connected tailnet.
+A `url-proxy-locator' function; set that variable to this.  Returns
+\"PROXY 127.0.0.1:<port>\" for a host under a connected tailnet's
+domain when ntailsd's HTTP listener is running, otherwise defers to
+`url-default-find-proxy-for-url' for URLOBJ so `url-proxy-services'
+keeps working.
+
+The url library can only drive HTTP proxies, so unlike ntailsd's PAC
+file this never returns SOCKS5."
+  (let ((http (alist-get 'http ntails--effective-settings)))
+    (if (and (integerp http) (> http 0) (ntails--tailnet-host-p host))
+        (format "PROXY 127.0.0.1:%d" http)
+      (url-default-find-proxy-for-url urlobj host))))
 
 ;;; Sign-in buffer
 
