@@ -157,20 +157,34 @@ first to restart it."
 (defun ntails--process-filter (_proc string)
   "Buffer STRING and dispatch each complete JSON-Lines message in it."
   (when (buffer-live-p ntails--output-buffer)
-    (with-current-buffer ntails--output-buffer
-      (save-excursion
+    (let (lines)
+      (with-current-buffer ntails--output-buffer
         (goto-char (point-max))
         (insert string)
         (goto-char (point-min))
         (while (search-forward "\n" nil t)
-          (let ((line (buffer-substring-no-properties (point-min) (point))))
-            (delete-region (point-min) (point))
-            (condition-case err
-                (let ((msg (json-parse-string line :object-type 'alist
-                                              :null-object nil
-                                              :false-object :json-false)))
-                  (ntails--handle-message msg))
-              (error (message "Ntails: JSON parse error: %S on line: %s" err line)))))))))
+          (push (buffer-substring-no-properties (point-min) (point)) lines)
+          (delete-region (point-min) (point))))
+      ;; Dispatched after leaving the output buffer: a handler can switch
+      ;; buffers (`ntails--login-show' pops one up), which must not redirect
+      ;; the line scan above into that buffer.
+      (dolist (line (nreverse lines))
+        (ntails--dispatch-line line)))))
+
+(defun ntails--dispatch-line (line)
+  "Decode one JSON-Lines LINE and hand it to `ntails--handle-message'."
+  (let ((msg (condition-case err
+                 (json-parse-string line :object-type 'alist
+                                    :null-object nil
+                                    :false-object :json-false)
+               (error
+                (message "Ntails: JSON parse error: %S on line: %s" err line)
+                nil))))
+    (when msg
+      (condition-case-unless-debug err
+          (ntails--handle-message msg)
+        (error
+         (message "Ntails: error handling %s message: %S" (alist-get 'type msg) err))))))
 
 (defun ntails--handle-message (msg)
   "Dispatch one decoded MSG alist: a response to its callback, or an event."
