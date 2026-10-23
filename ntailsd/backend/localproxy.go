@@ -2,6 +2,8 @@ package backend
 
 import (
 	"context"
+	"crypto/subtle"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -15,28 +17,78 @@ import (
 	"tailscale.com/net/socks5"
 )
 
+const proxyUser = "ntails"
+
+// proxyAuth holds the local proxies' shared password, atomically swappable
+// without rebinding either listener.
+type proxyAuth struct {
+	p atomic.Pointer[string]
+}
+
+func (a *proxyAuth) Get() string {
+	if p := a.p.Load(); p != nil {
+		return *p
+	}
+	return ""
+}
+
+func (a *proxyAuth) Set(password string) {
+	a.p.Store(&password)
+}
+
+// oneConnListener hands a single already-accepted net.Conn to socks5.Server.Serve
+// (the only entry point tailscale.com/net/socks5 exports), so each connection
+// gets a Server configured with the password in effect when it arrived,
+// without rebinding the listening socket on a password-only Reload.
+type oneConnListener struct {
+	conn net.Conn
+}
+
+func (l *oneConnListener) Accept() (net.Conn, error) {
+	if l.conn == nil {
+		return nil, net.ErrClosed
+	}
+	c := l.conn
+	l.conn = nil
+	return c, nil
+}
+
+func (l *oneConnListener) Close() error   { return nil }
+func (l *oneConnListener) Addr() net.Addr { return nil }
+
 // Each start* function binds port, which may be PortAuto (0, letting the OS
 // pick), and reports back the actual bound port -- the requested one, or
 // whatever the OS assigned.
 
-func startSOCKSProxy(registry *NetworkRegistry, port int) (stop func(), boundPort int, err error) {
+func startSOCKSProxy(registry *NetworkRegistry, port int, auth *proxyAuth) (stop func(), boundPort int, err error) {
 	// addr arrives exactly as the client sent it, name or IP, so routing by
 	// MagicDNS suffix sees the name.
-	srv := &socks5.Server{
-		Dialer: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			conn, err := dialViaRegistry(ctx, registry, network, addr)
-			if err != nil {
-				log.Printf("socks5: %v", err)
-			}
-			return conn, err
-		},
+	dialer := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		conn, err := dialViaRegistry(ctx, registry, network, addr)
+		if err != nil {
+			log.Printf("socks5: %v", err)
+		}
+		return conn, err
 	}
 
 	ln, err := listenLocal(port)
 	if err != nil {
 		return nil, 0, err
 	}
-	go srv.Serve(ln)
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			srv := &socks5.Server{Dialer: dialer}
+			if p := auth.Get(); p != "" {
+				srv.Username = proxyUser
+				srv.Password = p
+			}
+			_ = srv.Serve(&oneConnListener{conn: c})
+		}
+	}()
 	return func() { ln.Close() }, ln.Addr().(*net.TCPAddr).Port, nil
 }
 
@@ -82,8 +134,8 @@ func stopHTTPServer(srv *http.Server, ln net.Listener) func() {
 // (hijacked and spliced raw, for HTTPS and other TCP traffic) and plain
 // absolute-URI HTTP requests (round-tripped through a dialer scoped to this
 // one request, same as SOCKS dials fresh per connection).
-func startHTTPProxy(registry *NetworkRegistry, port int) (stop func(), boundPort int, err error) {
-	srv := &http.Server{Handler: httpProxyHandler(registry)}
+func startHTTPProxy(registry *NetworkRegistry, port int, auth *proxyAuth) (stop func(), boundPort int, err error) {
+	srv := &http.Server{Handler: httpProxyHandler(registry, auth)}
 
 	ln, err := listenLocal(port)
 	if err != nil {
@@ -93,8 +145,31 @@ func startHTTPProxy(registry *NetworkRegistry, port int) (stop func(), boundPort
 	return stopHTTPServer(srv, ln), ln.Addr().(*net.TCPAddr).Port, nil
 }
 
-func httpProxyHandler(registry *NetworkRegistry) http.HandlerFunc {
+func validProxyAuth(header, wantPass string) bool {
+	const prefix = "Basic "
+	if len(header) < len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
+		return false
+	}
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(header[len(prefix):]))
+	if err != nil {
+		return false
+	}
+	user, pass, ok := strings.Cut(string(raw), ":")
+	// Compare both halves unconditionally in constant time, same as
+	// tailscale.com/net/socks5, so neither length nor early mismatch leaks
+	// through timing to another local process.
+	userMatch := subtle.ConstantTimeCompare([]byte(user), []byte(proxyUser))
+	passMatch := subtle.ConstantTimeCompare([]byte(pass), []byte(wantPass))
+	return ok && userMatch == 1 && passMatch == 1
+}
+
+func httpProxyHandler(registry *NetworkRegistry, auth *proxyAuth) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if want := auth.Get(); want != "" && !validProxyAuth(r.Header.Get("Proxy-Authorization"), want) {
+			w.Header().Set("Proxy-Authenticate", `Basic realm="ntails"`)
+			http.Error(w, http.StatusText(http.StatusProxyAuthRequired), http.StatusProxyAuthRequired)
+			return
+		}
 		if r.Method == http.MethodConnect {
 			handleHTTPConnect(w, r, registry)
 			return
@@ -139,6 +214,7 @@ func handleHTTPForward(w http.ResponseWriter, r *http.Request, registry *Network
 
 	outReq := r.Clone(r.Context())
 	outReq.RequestURI = ""
+	outReq.Header.Del("Proxy-Authorization")
 
 	transport := &http.Transport{
 		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
@@ -226,6 +302,7 @@ type LocalProxy struct {
 	current   ProxySettings // as requested: may contain PortOff/PortAuto
 	effective ProxySettings // as actually bound: PortOff, or the real listening port
 
+	auth       proxyAuth
 	pacTargets pacTargets
 	stops      [numSlots]func()
 }
@@ -253,12 +330,19 @@ func (p *LocalProxy) Current() ProxySettings {
 func (p *LocalProxy) startSlot(slot, port int) (stop func(), bound int, err error) {
 	switch slot {
 	case slotSOCKS:
-		return startSOCKSProxy(p.registry, port)
+		return startSOCKSProxy(p.registry, port, &p.auth)
 	case slotPAC:
 		return startPACServer(p.registry, port, &p.pacTargets)
 	default:
-		return startHTTPProxy(p.registry, port)
+		return startHTTPProxy(p.registry, port, &p.auth)
 	}
+}
+
+// SetPassword changes the password the SOCKS5 and HTTP listeners require,
+// effective on their next connection; an empty password disables
+// authentication. Independent of Start/Reload: it never rebinds a listener.
+func (p *LocalProxy) SetPassword(password string) {
+	p.auth.Set(password)
 }
 
 func (p *LocalProxy) storePACTargets() {

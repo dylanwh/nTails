@@ -87,14 +87,16 @@ type networkDTO struct {
 	Error      *rpcError `json:"error,omitempty"` // present exactly when Status is "error"
 }
 
-// settingsDTO is get_settings'/save_settings' response. Requested is what's
-// configured (may hold PortOff/PortAuto) and is exactly what save_settings
-// takes, so a client can round-trip it through an edit form without turning
-// PortAuto into whatever port it happened to get. Effective is what's
-// actually bound right now.
+// settingsDTO is get_settings'/save_settings'/set_proxy_password's response.
+// Requested is what's configured (may hold PortOff/PortAuto) and is exactly
+// what save_settings takes, so a client can round-trip it through an edit
+// form without turning PortAuto into whatever port it happened to get.
+// Effective is what's actually bound right now. Password is reported
+// alongside both as a sibling, never accepted by save_settings.
 type settingsDTO struct {
 	Requested backend.ProxySettings `json:"requested"`
 	Effective backend.ProxySettings `json:"effective"`
+	Password  string                `json:"password"`
 }
 
 func toDTO(n *backend.Network) networkDTO {
@@ -119,6 +121,7 @@ type Proxy interface {
 	// binding the new ones and retiring the old (see LocalProxy.Reload).
 	Reload(s backend.ProxySettings, persist func() error) error
 	Effective() backend.ProxySettings
+	SetPassword(password string)
 }
 
 // Fatal writes a "fatal" event carrying code to stdout -- the only line a
@@ -163,8 +166,8 @@ func newServer(registry *backend.NetworkRegistry, proxy Proxy, stopServices func
 		registry:     registry,
 		proxy:        proxy,
 		stopServices: stopServices,
-		loadSettings: backend.LoadSettings,
-		saveSettings: backend.SaveSettings,
+		loadConfig:   backend.LoadConfig,
+		saveConfig:   backend.SaveConfig,
 		enc:          json.NewEncoder(out),
 	}
 }
@@ -259,8 +262,8 @@ type server struct {
 	proxy        Proxy
 	stopServices func()
 	// The config file, swappable so tests don't touch the real one.
-	loadSettings func() backend.ProxySettings
-	saveSettings func(backend.ProxySettings) error
+	loadConfig func() backend.Config
+	saveConfig func(backend.Config) error
 
 	forgetting sync.WaitGroup // background logouts (Network.Forget) still running
 
@@ -489,7 +492,8 @@ func (s *server) handle(req request) (quit bool) {
 		}
 		// The config file is the source of truth for what was requested,
 		// and stays right even if the initial Start failed.
-		s.respond(req.ID, settingsDTO{s.loadSettings(), s.proxy.Effective()})
+		cfg := s.loadConfig()
+		s.respond(req.ID, settingsDTO{cfg.ProxySettings, s.proxy.Effective(), cfg.Password})
 
 	case "login_network":
 		var args struct {
@@ -556,6 +560,9 @@ func (s *server) handle(req request) (quit bool) {
 	case "save_settings":
 		s.saveSettingsCmd(req)
 
+	case "set_proxy_password":
+		s.setProxyPasswordCmd(req)
+
 	case "quit":
 		if e := noArgs(req); e != nil {
 			s.fail(req, e, nil)
@@ -605,12 +612,16 @@ func (s *server) saveSettingsCmd(req request) {
 	// listeners: a collision only surfaces at bind time, and saving first
 	// would leave a config that fails again on every restart. Reload undoes
 	// everything, keeping each old listener's exact port, if either fails.
-	err := s.proxy.Reload(next, func() error { return s.saveSettings(next) })
+	// persist writes next into the loaded config rather than a bare
+	// ProxySettings, so a port save never drops the saved password.
+	cfg := s.loadConfig()
+	cfg.ProxySettings = next
+	err := s.proxy.Reload(next, func() error { return s.saveConfig(cfg) })
 	var cfgErr *backend.ProxyConfigError
 	var dupErr *backend.DuplicatePortError
 	switch {
 	case err == nil:
-		s.respond(req.ID, settingsDTO{next, s.proxy.Effective()})
+		s.respond(req.ID, settingsDTO{next, s.proxy.Effective(), cfg.Password})
 	case errors.As(err, &dupErr):
 		s.fail(req, &rpcError{Code: "duplicate_port", Fields: dupErr.Fields[:]}, nil)
 	case errors.As(err, &cfgErr):
@@ -618,6 +629,37 @@ func (s *server) saveSettingsCmd(req request) {
 	default: // persist failed
 		s.fail(req, &rpcError{Code: "storage_failed"}, err)
 	}
+}
+
+// maxPasswordBytes bounds the proxy password to what RFC 1929's SOCKS5
+// username/password subnegotiation can carry: both the username and the
+// password are length-prefixed by a single byte.
+const maxPasswordBytes = 255
+
+// setProxyPasswordCmd validates and persists a new proxy password, then
+// applies it to the running listeners. No listener rebinds, so unlike
+// saveSettingsCmd there's nothing to roll back if persisting succeeds.
+func (s *server) setProxyPasswordCmd(req request) {
+	var args struct {
+		Password string `json:"password"`
+	}
+	if e := decodeArgs(req.Args, &args, "password"); e != nil {
+		s.fail(req, e, nil)
+		return
+	}
+	if len(args.Password) > maxPasswordBytes {
+		s.fail(req, &rpcError{Code: "invalid_password"}, nil)
+		return
+	}
+
+	cfg := s.loadConfig()
+	cfg.Password = args.Password
+	if err := s.saveConfig(cfg); err != nil {
+		s.fail(req, &rpcError{Code: "storage_failed"}, err)
+		return
+	}
+	s.proxy.SetPassword(args.Password)
+	s.respond(req.ID, settingsDTO{cfg.ProxySettings, s.proxy.Effective(), cfg.Password})
 }
 
 func (s *server) respond(id *int64, data any) {

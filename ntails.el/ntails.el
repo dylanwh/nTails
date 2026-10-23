@@ -37,6 +37,9 @@
 ;;   s    set the local SOCKS5/HTTP/PAC ports
 ;;   g    refresh; n/p move; S sorts a column; q buries the buffer
 ;;
+;; M-x ntails-set-proxy-password sets or clears the local proxies'
+;; password; it has no keybinding since it's rarely needed.
+;;
 ;; Signing in opens a buffer with the sign-in URL and, when the
 ;; `qrencode' package (GNU ELPA) is loaded, a QR code to scan from a
 ;; phone.  There, o opens the URL in a browser, w copies it, q closes.
@@ -56,7 +59,8 @@
 ;;   (setq url-proxy-locator #'ntails-find-proxy-for-url)
 ;;
 ;; Hosts under a connected tailnet's domain then go through ntailsd's
-;; HTTP proxy; every other URL is handled as before.
+;; HTTP proxy (including its password, if one is set); every other URL
+;; is handled as before.
 ;;
 ;; The ntails-* functions and hooks are usable on their own for other
 ;; frontends.
@@ -71,6 +75,8 @@
 
 (declare-function qrencode "qrencode" (s &optional mode errcorr return-raw))
 (declare-function qrencode-format "qrencode" (qr))
+
+(defvar url-http-proxy-basic-auth-storage nil)
 
 (defgroup ntails nil
   "Client for the ntailsd RPC backend."
@@ -122,6 +128,14 @@ response.")
   "The ports ntailsd is using, cached from the last `get_settings'/`save_settings'.
 Same keys as `ntails--settings'; -1 for a listener that is off.")
 
+(defvar ntails--proxy-password nil
+  "Cached proxy password, from the last `get_settings'/`save_settings'/
+`set_proxy_password' response's top-level `password' key.  Empty string
+for none.")
+
+(defvar ntails--proxy-auth-entry nil
+  "Entry installed by ntails in `url-http-proxy-basic-auth-storage', or nil.")
+
 (defvar ntails--output-buffer nil
   "Internal buffer accumulating not-yet-newline-terminated stdout.")
 
@@ -155,14 +169,19 @@ first to restart it."
          :filter #'ntails--process-filter
          :sentinel #'ntails--process-sentinel
          :stderr ntails--log-buffer
-         :noquery t)))
+         :noquery t))
+  (ntails-get-settings))
 
 (defun ntails--process-sentinel (proc event)
   "Clean up after PROC (ntailsd) exits, logging EVENT."
   (unless (process-live-p proc)
     (when (buffer-live-p ntails--output-buffer)
       (kill-buffer ntails--output-buffer))
-    (setq ntails--process nil)
+    (setq ntails--process nil
+          ntails--settings nil
+          ntails--effective-settings nil
+          ntails--proxy-password nil)
+    (ntails--sync-proxy-auth)
     (clrhash ntails--callbacks)
     (clrhash ntails--networks)
     (message "Ntails: process exited (%s)" (string-trim event))))
@@ -257,7 +276,7 @@ docs/rpc-protocol.md)."
     (when callback
       (puthash id callback ntails--callbacks))
     (process-send-string ntails--process
-                          (concat (json-serialize req :null-object nil :false-object :json-false) "\n"))
+                         (concat (json-serialize req :null-object nil :false-object :json-false) "\n"))
     id))
 
 ;;; Commands
@@ -273,12 +292,37 @@ CALLBACK, if given, is called with the response alist."
                         (puthash (alist-get 'id net) net ntails--networks)))
                     (when callback (funcall callback res)))))
 
+(defun ntails--sync-proxy-auth ()
+  "Sync `url-http-proxy-basic-auth-storage' with `ntails--proxy-password'.
+When ntailsd's HTTP proxy is running and a password is set, records
+Basic credentials for user \"ntails\" on `127.0.0.1:<http>' so
+`url-retrieve' authenticates automatically; otherwise removes any
+entry previously installed by ntails."
+  (when ntails--proxy-auth-entry
+    (setq url-http-proxy-basic-auth-storage
+          (delq ntails--proxy-auth-entry url-http-proxy-basic-auth-storage)
+          ntails--proxy-auth-entry nil))
+  (let ((http (alist-get 'http ntails--effective-settings))
+        (pass ntails--proxy-password))
+    (when (and (integerp http) (> http 0)
+               (stringp pass) (not (string-empty-p pass)))
+      (let* ((server (format "127.0.0.1:%d" http))
+             (token (base64-encode-string
+                     (encode-coding-string (concat "ntails:" pass) 'utf-8)
+                     t))
+             (entry (list server (cons "/" token))))
+        (setq url-http-proxy-basic-auth-storage
+              (cons entry (assoc-delete-all server url-http-proxy-basic-auth-storage))
+              ntails--proxy-auth-entry entry)))))
+
 (defun ntails--cache-settings (res)
-  "Store RES's `requested' and `effective' ports if RES is ok."
+  "Store RES's `requested', `effective', and `password' fields if RES is ok."
   (when (eq (alist-get 'ok res) t)
     (let ((data (alist-get 'data res)))
       (setq ntails--settings (alist-get 'requested data)
-            ntails--effective-settings (alist-get 'effective data)))))
+            ntails--effective-settings (alist-get 'effective data)
+            ntails--proxy-password (alist-get 'password data))
+      (ntails--sync-proxy-auth))))
 
 (defun ntails-get-settings (&optional callback)
   "Request ntailsd's current proxy settings, refreshing `ntails--settings'.
@@ -314,6 +358,14 @@ CALLBACK, if given, is called with the response alist."
                   `((socks . ,socks-port)
                     (pac . ,pac-port)
                     (http . ,http-port))
+                  (lambda (res)
+                    (ntails--cache-settings res)
+                    (when callback (funcall callback res)))))
+
+(defun ntails-set-proxy-password (password &optional callback)
+  "Set ntailsd's local proxy password to PASSWORD (empty string for none).
+CALLBACK, if given, is called with the response alist."
+  (ntails-request "set_proxy_password" `((password . ,(or password "")))
                   (lambda (res)
                     (ntails--cache-settings res)
                     (when callback (funcall callback res)))))
@@ -356,8 +408,8 @@ safe to re-run."
                              ntails--networks)
                     (nreverse ds)))
          (block (format "Host %s\n    ProxyCommand %S connect %%h %%p\n"
-                         (mapconcat (lambda (d) (concat "*." d)) domains " ")
-                         (or (executable-find ntails-executable) ntails-executable)))
+                        (mapconcat (lambda (d) (concat "*." d)) domains " ")
+                        (or (executable-find ntails-executable) ntails-executable)))
          (marked (concat ntails--ssh-config-marker-begin "\n" block ntails--ssh-config-marker-end "\n"))
          (content (if (file-exists-p path)
                       (with-temp-buffer (insert-file-contents path) (buffer-string))
@@ -401,7 +453,8 @@ A `url-proxy-locator' function; set that variable to this.  Returns
 \"PROXY 127.0.0.1:<port>\" for a host under a connected tailnet's
 domain when ntailsd's HTTP listener is running, otherwise defers to
 `url-default-find-proxy-for-url' for URLOBJ so `url-proxy-services'
-keeps working.
+keeps working.  When a proxy password is configured in ntailsd,
+`ntails--sync-proxy-auth' supplies it to `url-http' automatically.
 
 The url library can only drive HTTP proxies, so unlike ntailsd's PAC
 file this never returns SOCKS5."
@@ -551,8 +604,8 @@ For \"error\", shows the `detail' from NET's `error' field as is."
     (maphash
      (lambda (id net)
        (push (list id (vector (ntails--network-display-name net)
-                               (ntails--network-status-title net)
-                               (ntails--network-provider net)))
+                              (ntails--network-status-title net)
+                              (ntails--network-provider net)))
              entries))
      ntails--networks)
     (sort entries (lambda (a b) (string-lessp (aref (cadr a) 0) (aref (cadr b) 0))))))
@@ -639,13 +692,13 @@ codes fall back to the raw code."
   "Connect the network at point."
   (interactive)
   (ntails-connect-network (ntails--network-list-id-at-point)
-                           #'ntails--network-list-report-error))
+                          #'ntails--network-list-report-error))
 
 (defun ntails-network-list-disconnect ()
   "Disconnect the network at point."
   (interactive)
   (ntails-disconnect-network (ntails--network-list-id-at-point)
-                              #'ntails--network-list-report-error))
+                             #'ntails--network-list-report-error))
 
 (defun ntails-network-list-primary-action ()
   "Primary action for the network at point.
@@ -702,6 +755,12 @@ Any of the three may be `-1' (off) or `0' (let the OS pick)."
            (read-number "PAC port (-1 off, 0 auto): " (funcall current 'pac 1081))
            (read-number "HTTP proxy port (-1 off, 0 auto): " (funcall current 'http 1082)))))
   (ntails-save-settings socks pac http #'ntails--network-list-report-error))
+
+(defun ntails-network-list-set-proxy-password (password)
+  "Set ntailsd's local proxy password to PASSWORD (empty to disable)."
+  (interactive
+   (list (read-passwd "Proxy password (empty to disable): ")))
+  (ntails-set-proxy-password password #'ntails--network-list-report-error))
 
 (defvar ntails-network-list-mode-map
   (let ((map (make-sparse-keymap)))

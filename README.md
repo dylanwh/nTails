@@ -92,8 +92,9 @@ It runs `ntailsd` as a subprocess, so unpack a `ntailsd` archive from the
 [releases page][releases] and put it on your `PATH` first.
 
 Then `M-x ntails-network-list`. `a` adds a tailnet and opens a sign-in buffer
-with a QR code to scan from your phone. The QR code needs the [qrencode][]
-package from GNU ELPA, which package managers install for you.
+with a QR code to scan from your phone (`s` sets the proxy ports; `M-x
+ntails-set-proxy-password` sets a proxy password). The QR code needs the
+[qrencode][] package from GNU ELPA, which package managers install for you.
 
 To send Emacs' own HTTP requests (eww, package.el, and anything else built on
 `url-retrieve`) to hosts on your tailnets through `ntailsd`, the same way the
@@ -102,6 +103,11 @@ PAC file does for browsers:
 ```elisp
 (setq url-proxy-locator #'ntails-find-proxy-for-url)
 ```
+
+If you set a proxy password (`M-x ntails-set-proxy-password`), `ntails.el`
+automatically registers the credentials (`ntails` and your password) in
+`url-http-proxy-basic-auth-storage` for the running HTTP proxy port, so
+`url-retrieve` authenticates without prompting.
 
 ### macOS
 

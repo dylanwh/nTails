@@ -115,6 +115,7 @@ read or answered.
 | `disconnect_network` | `{id}`                                | none — tears down the tailnet connection without discarding its session; `status` becomes `disconnected`. Valid from any status except `disconnected` itself (including `connecting`/`waiting for login`/`error`, as a way to cancel). A later `connect_network` resumes without a fresh sign-in                                                                                                                                                          |
 | `logout_network`     | `{id}`                                | none — the terminal action. Valid from any status, with no `connect_network` back into it afterward. Fires a `network_removed` event, then continues in the background: it tells the control server to invalidate the session (best effort, starting the tailnet node briefly if it isn't running; if that fails, the server is never told), shuts down the connection, and always forgets the entry and its local state. `quit` waits for this to finish |
 | `save_settings`      | `ProxySettings` (all three keys)      | `ProxyStatus` — the new configuration and the resulting bound ports, so a caller that requested `0` for a port learns what the OS actually picked without a separate `get_settings` round trip. All or nothing; see [Saving settings](#saving-settings)                                                                                                                                                                                                   |
+| `set_proxy_password` | `{password}`                          | `ProxyStatus` — sets the local proxies' shared password (`""` disables authentication); see [Local proxies](#local-proxies). Independent of `save_settings`: it never touches `socks`/`pac`/`http`, and no listener rebinds                                                                                                                                                                                                                                 |
 | `quit`               | none                                  | none — the server responds, cleans up, and exits. If a `logout_network` is still finishing in the background, it waits for that first (up to about 20 seconds), so a client should allow at least that long before killing it                                                                                                                                                                                                                             |
 
 Any command can fail instead, returning `{"ok":false,"error":{...}}` in place of
@@ -140,7 +141,8 @@ server's stderr log. A client should handle a `code` it doesn't recognize like
 | `invalid_port`      | `field`  | `save_settings`                                           | the port for `field` (`"socks"`, `"pac"`, or `"http"`) isn't `-1`, `0`, or 1–65535                                                                                                                                                                                               |
 | `duplicate_port`    | `fields` | `save_settings`                                           | the two listeners named in `fields` would share a port: both asked for the same one (`> 0`), or the first asked for the port the second, whose setting isn't changing, is actually bound to (e.g. one it auto-picked)                                                            |
 | `port_unavailable`  | `field`  | `save_settings`, `invalid_config` event                   | the port for `field` couldn't be bound because something outside ntails holds it. From `save_settings`, nothing changed; `field` may name a listener the save didn't change, since one that failed at startup is retried by every save                                           |
-| `storage_failed`    | —        | `login_network`, `save_settings`                          | the server couldn't write its own files, e.g. the disk is full or its data folder isn't writable. Nothing changed: no network was added, or no settings were applied                                                                                                             |
+| `invalid_password`  | —        | `set_proxy_password`                                      | `password` is over 255 bytes, the limit RFC 1929's SOCKS5 username/password subnegotiation can carry                                                                                                                                                                              |
+| `storage_failed`    | —        | `login_network`, `save_settings`, `set_proxy_password`    | the server couldn't write its own files, e.g. the disk is full or its data folder isn't writable. Nothing changed: no network was added, or no settings were applied                                                                                                             |
 | `start_failed`      | `detail` | a `Network`'s `error`                                     | the network's local tailnet node couldn't start; `detail` is the underlying reason, for display                                                                                                                                                                                  |
 | `connect_failed`    | `detail` | a `Network`'s `error`                                     | the node started but couldn't come up with the control server (unreachable, rejected, etc.); `detail` is the underlying reason, for display                                                                                                                                      |
 | `already_running`   | —        | `fatal` event                                             | another ntailsd is already running for this user, so this one is exiting                                                                                                                                                                                                         |
@@ -237,20 +239,23 @@ These are also the defaults when nothing has been saved yet. Each port also acce
     "socks": 50861,
     "pac": 1081,
     "http": -1
-  }
+  },
+  "password": ""
 }
 ```
-Because `0` doesn't tell you what port you actually got, `get_settings` and `save_settings` both return two `ProxySettings`:
+Because `0` doesn't tell you what port you actually got, `get_settings`, `save_settings`, and `set_proxy_password` all return two `ProxySettings` plus the password, as siblings:
 - `requested` is what's configured, sentinels included. It's exactly what `save_settings` takes, so a settings editor should seed from it and send it back. Seeding from `effective` instead would quietly turn "pick a port" into whatever port it happened to get the moment the user saves.
 - `effective` is what's actually bound right now: the real port for anything running, `-1` for anything off, never a literal `0`. Use it to show or connect to the live listeners.
+- `password` is the proxy password in effect, `""` for none. It's set only by `set_proxy_password`, never by `save_settings`, so a ports-only save never drops it.
 
-The config file stores `requested`, so "off" and "pick a fresh port each time" both survive a restart rather than freezing on a resolved port.
+The config file stores `requested` and `password`, so "off" and "pick a fresh port each time" both survive a restart rather than freezing on a resolved port, and so does the password.
 
 ## Local proxies
 
 All three listeners bind to `127.0.0.1` only.
 
 - **`socks`** is a SOCKS5 proxy, and **`http`** is a standard forward HTTP proxy: CONNECT for HTTPS/TCP tunneling, and absolute-URI requests for plain HTTP. `http` is an alternative to `socks` for clients that only support configuring an HTTP proxy.
+- When the password (`ProxyStatus`'s `password`, set by `set_proxy_password`) is non-empty, `socks` requires SOCKS5 username/password authentication (RFC 1929) and `http` requires HTTP `Basic` proxy authentication (`Proxy-Authorization`, replying `407 Proxy Authentication Required` otherwise), both with username `"ntails"` and that password. `pac` never requires authentication. RFC 1929 length-prefixes the username and password with a single byte each, so the password is capped at 255 bytes; `set_proxy_password` rejects a longer one with `invalid_password`.
 - Both only reach hosts by name under a **connected** tailnet's `domain`, e.g. `server.tailc7714.ts.net`. Anything else is refused: a failed SOCKS5 request, or HTTP `502`. That includes tailnet IP addresses and every non-tailnet host. So neither should be set as a system-wide proxy on its own; use the PAC file for that.
 - The name is looked up in that tailnet's own DNS (MagicDNS), never public DNS, so it covers device names as well as anything else the tailnet's DNS serves, such as Headscale `extra_records` and split-DNS routes. A name the tailnet's DNS has no address for is refused the same way, even if the same name exists on the public internet: the server never connects to a different machine that happens to share the name. Clients should therefore hand the proxy the name itself and let it resolve the address (SOCKS5 with remote name resolution, as browsers do for PAC results).
 - **`pac`** serves a proxy auto-config file at `http://127.0.0.1:<pac>/proxy.pac`, generated fresh on each request. For every connected tailnet it routes hosts that are subdomains of `<domain>` through whichever of the other two listeners are running: `SOCKS5` first, then the HTTP proxy as `PROXY`. PAC clients that can't use SOCKS5 therefore fall back to HTTP. Everything else goes `DIRECT`, as does every host when both `socks` and `http` are off or no tailnet is connected.
@@ -277,6 +282,15 @@ response is the error. In one rare case it can't: a listener that gave up its
 port for another's in the same save, if something outside ntails grabs that port
 in the moment between. That listener is then left off, exactly as if it had
 failed at startup (see below).
+
+### Setting the proxy password
+
+`set_proxy_password` checks `password` (`invalid_args` if it's missing or not
+a string, `invalid_password` if over 255 bytes), writes it to the config file,
+and only then applies it to the running `socks` and `http` listeners. Neither
+listener rebinds, so there's nothing to roll back if applying it somehow failed
+after a successful write; the only failure that can happen is `storage_failed`,
+in which case nothing changed.
 
 ### Startup failures
 

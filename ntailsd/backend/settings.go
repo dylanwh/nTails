@@ -18,6 +18,14 @@ type ProxySettings struct {
 	HTTP  int `json:"http"`
 }
 
+// Config is the config file's shape: ProxySettings plus the proxy password,
+// which is set independently via set_proxy_password and so is never touched
+// by a ports-only save.
+type Config struct {
+	ProxySettings
+	Password string `json:"password,omitempty"`
+}
+
 const (
 	PortOff  = -1
 	PortAuto = 0
@@ -37,26 +45,26 @@ func settingsPath() (string, error) {
 	return filepath.Join(dir, "config.json"), nil
 }
 
-func LoadSettings() ProxySettings {
-	s := ProxySettings{SOCKS: defaultSOCKSPort, PAC: defaultPACPort, HTTP: defaultHTTPPort}
+func LoadConfig() Config {
+	c := Config{ProxySettings: ProxySettings{SOCKS: defaultSOCKSPort, PAC: defaultPACPort, HTTP: defaultHTTPPort}}
 	path, err := settingsPath()
 	if err != nil {
-		return s
+		return c
 	}
 	if data, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(data, &s)
+		_ = json.Unmarshal(data, &c)
 	}
-	return s
+	return c
 }
 
-// SaveSettings writes s to the config file atomically: a temp file renamed
+// SaveConfig writes c to the config file atomically: a temp file renamed
 // over it, so a failed write never leaves a truncated config behind.
-func SaveSettings(s ProxySettings) error {
+func SaveConfig(c Config) error {
 	path, err := settingsPath()
 	if err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(s, "", "  ")
+	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return err
 	}

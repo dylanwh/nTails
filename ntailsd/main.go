@@ -90,9 +90,10 @@ func setup() (registry *backend.NetworkRegistry, localProxy *backend.LocalProxy,
 		stops = append(stops, stop)
 	}
 
-	settings := backend.LoadSettings()
+	cfg := backend.LoadConfig()
 	localProxy = backend.NewLocalProxy(registry)
-	initialProxyErr = localProxy.Start(settings)
+	localProxy.SetPassword(cfg.Password)
+	initialProxyErr = localProxy.Start(cfg.ProxySettings)
 
 	if loaded, err := backend.LoadNetworks(); err == nil {
 		for _, n := range loaded {
