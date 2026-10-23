@@ -10,7 +10,7 @@
 // itself. The dialog never shows them as numbers: -1 is an unticked
 // checkbox on that row, 0 a blank port field.
 //
-// socks/pac/http are ntailsd's requested ports (what save_settings takes
+// socks/pac/http are ntailsd's requested ports (what save_ports takes
 // and what the dialog edits); effective is what's actually bound, shown only
 // as each listener's read-only, copyable URL.
 struct ProxyPorts {

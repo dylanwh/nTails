@@ -70,7 +70,7 @@ func main() {
 // setup starts the proxy listener, local proxy, and loads saved networks and
 // settings. initialProxyErr joins one *backend.ProxyConfigError per local
 // proxy listener that failed to start (e.g. a configured port already in
-// use); the rest still run. Recoverable via save_settings, so it's returned
+// use); the rest still run. Recoverable via save_ports, so it's returned
 // for the caller to surface rather than treated as fatal here.
 func setup() (registry *backend.NetworkRegistry, localProxy *backend.LocalProxy, stopServices func(), initialProxyErr error) {
 	registry = &backend.NetworkRegistry{}

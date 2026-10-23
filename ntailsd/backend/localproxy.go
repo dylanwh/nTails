@@ -243,7 +243,7 @@ func handleHTTPForward(w http.ResponseWriter, r *http.Request, registry *Network
 // be started -- typically its configured port is already in use by
 // something else. This is a recoverable configuration problem: at startup
 // the rpc server reports it to the client as an "invalid_config" event so
-// the user can pick a different port via save_settings.
+// the user can pick a different port via save_ports.
 type ProxyConfigError struct {
 	Field string
 	Err   error

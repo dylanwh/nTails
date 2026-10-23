@@ -323,8 +323,8 @@ final class RPCService {
         return try JSONDecoder().decode([Network].self, from: data)
     }
 
-    func getSettings() async throws -> ProxyStatus {
-        let data = try await sendCommand(cmd: "get_settings", args: nil)
+    func getPorts() async throws -> ProxyStatus {
+        let data = try await sendCommand(cmd: "get_ports", args: nil)
         return try JSONDecoder().decode(ProxyStatus.self, from: data)
     }
 
@@ -353,12 +353,12 @@ final class RPCService {
         _ = try await sendCommand(cmd: "logout_network", args: args)
     }
 
-    func saveSettings(_ settings: ProxySettings) async throws -> ProxyStatus {
+    func savePorts(_ settings: ProxySettings) async throws -> ProxyStatus {
         let data = try JSONEncoder().encode(settings)
         guard let argsObj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw RPCError(code: "invalid_args", detail: "Could not serialize settings")
         }
-        let resData = try await sendCommand(cmd: "save_settings", args: argsObj)
+        let resData = try await sendCommand(cmd: "save_ports", args: argsObj)
         return try JSONDecoder().decode(ProxyStatus.self, from: resData)
     }
 

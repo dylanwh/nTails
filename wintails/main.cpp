@@ -83,7 +83,7 @@ int JInt(json_t *obj, const char *key, int def) {
     return v ? static_cast<int>(json_integer_value(v)) : def;
 }
 
-// Reads a get_settings/save_settings ProxyStatus ({requested, effective},
+// Reads a get_ports/save_ports ProxyStatus ({requested, effective},
 // docs/rpc-protocol.md) into s, keeping s's current values for anything
 // missing.
 void ApplyProxyStatus(json_t *data, SettingsValues *s) {
@@ -401,7 +401,7 @@ void MainWindow::OnCreate() {
             ShowTrayBalloon("winTails", JField(data, "body"));
         } else if (name == "invalid_config") {
             // data is an Error object; that one listener stays off until a
-            // save_settings succeeds (docs/rpc-protocol.md).
+            // save_ports succeeds (docs/rpc-protocol.md).
             ShowTrayBalloon("winTails proxy is off",
                             DescribeRpcError(data) +
                                 " Open Settings to change it, or save again "
@@ -502,9 +502,9 @@ void MainWindow::OnSettingsClicked() {
         RefreshSettingsCache();
 }
 
-// Saves v: its ports through ntailsd's save_settings when sendPorts (which
+// Saves v: its ports through ntailsd's save_ports when sendPorts (which
 // also retries any listener that failed to start), then the wintails-local
-// parts (see CommitSettings). onResult gets save_settings' error, if any.
+// parts (see CommitSettings). onResult gets save_ports' error, if any.
 void MainWindow::SaveSettings(
     const SettingsValues &v, bool sendPorts,
     std::function<void(bool, const std::string &)> onResult) {
@@ -515,7 +515,7 @@ void MainWindow::SaveSettings(
     }
     json_t *args = json_pack("{s:i, s:i, s:i}", "socks", v.socks, "pac",
                               v.pac, "http", v.http);
-    rpc_.Send("save_settings", args,
+    rpc_.Send("save_ports", args,
               [this, v, onResult](bool ok, json_t *data,
                                   const std::string &error) {
                   if (!ok) {
@@ -527,7 +527,7 @@ void MainWindow::SaveSettings(
               });
 }
 
-// The wintails-local half of a save. data is save_settings' ProxyStatus, or
+// The wintails-local half of a save. data is save_ports' ProxyStatus, or
 // null if ports weren't sent.
 void MainWindow::CommitSettings(const SettingsValues &v, json_t *data) {
     if (settingsCache_.updateSshConfig &&
@@ -597,7 +597,7 @@ void MainWindow::ShowAppsSetup(const std::string &id) {
     v.useSystemPac = choice.useSystemPac;
     v.updateSshConfig = choice.updateSshConfig;
     // Only touch ports to move blocked listeners onto free ones; otherwise
-    // save_settings would just retry them and fail the same way.
+    // save_ports would just retry them and fail the same way.
     bool sendPorts = choice.repickPorts && !context.blocked.empty();
     if (sendPorts) {
         for (const Listener &l : listeners) {
@@ -618,7 +618,7 @@ void MainWindow::RefreshSettingsCache() {
     settingsCache_.sshConfigPath = WideToUtf8(pref.path);
     settingsCache_.useSystemPac = LoadUseSystemPac();
 
-    rpc_.Send("get_settings", nullptr,
+    rpc_.Send("get_ports", nullptr,
               [this](bool ok, json_t *data, const std::string &) {
                   if (!ok)
                       return;
@@ -628,7 +628,7 @@ void MainWindow::RefreshSettingsCache() {
                   // wherever it actually is now.
                   SyncSystemPac();
                   // Networks may already have arrived (list_networks and
-                  // get_settings race) before this local pref was known --
+                  // get_ports race) before this local pref was known --
                   // (re)sync now that it is.
                   SyncSshConfig();
               });

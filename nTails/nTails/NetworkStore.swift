@@ -63,7 +63,7 @@ final class NetworkStore {
         defer { isLoading = false }
         do {
             async let fetchedNetworks = rpcService.listNetworks()
-            async let fetchedSettings = rpcService.getSettings()
+            async let fetchedSettings = rpcService.getPorts()
             let (nets, proxyStatus) = try await (fetchedNetworks, fetchedSettings)
             let sshManager = SSHConfigManager.shared
             self.settings = Settings(
@@ -318,7 +318,7 @@ final class NetworkStore {
 
         Task {
             do {
-                let status = try await rpcService.saveSettings(newSettings.proxy)
+                let status = try await rpcService.savePorts(newSettings.proxy)
                 self.settings.proxyStatus = status
                 self.invalidConfigErrors.removeAll()
             } catch {

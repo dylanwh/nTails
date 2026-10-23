@@ -120,17 +120,17 @@ Each value is an alist shaped like a `network_changed' event's
 data.")
 
 (defvar ntails--settings nil
-  "Cached `requested' ports from the last `get_settings'/`save_settings'.
+  "Cached `requested' ports from the last `get_ports'/`save_ports'.
 An alist with `socks', `pac', and `http' keys, or nil before the first
 response.")
 
 (defvar ntails--effective-settings nil
-  "The ports ntailsd is using, cached from the last `get_settings'/`save_settings'.
+  "The ports ntailsd is using, cached from the last `get_ports'/`save_ports'.
 Same keys as `ntails--settings'; -1 for a listener that is off.")
 
 (defvar ntails--proxy-password nil
-  "Cached proxy password, from the last `get_settings'/`save_settings'/
-`set_proxy_password' response's top-level `password' key.  Empty string
+  "Cached proxy password, from the last `get_proxy_password'/
+`set_proxy_password' response's `password' key.  Empty string
 for none.")
 
 (defvar ntails--proxy-auth-entry nil
@@ -170,7 +170,8 @@ first to restart it."
          :sentinel #'ntails--process-sentinel
          :stderr ntails--log-buffer
          :noquery t))
-  (ntails-get-settings))
+  (ntails-get-ports)
+  (ntails-get-proxy-password))
 
 (defun ntails--process-sentinel (proc event)
   "Clean up after PROC (ntailsd) exits, logging EVENT."
@@ -315,21 +316,35 @@ entry previously installed by ntails."
               (cons entry (assoc-delete-all server url-http-proxy-basic-auth-storage))
               ntails--proxy-auth-entry entry)))))
 
-(defun ntails--cache-settings (res)
-  "Store RES's `requested', `effective', and `password' fields if RES is ok."
+(defun ntails--cache-ports (res)
+  "Store RES's `requested' and `effective' ports if RES is ok."
   (when (eq (alist-get 'ok res) t)
     (let ((data (alist-get 'data res)))
       (setq ntails--settings (alist-get 'requested data)
-            ntails--effective-settings (alist-get 'effective data)
-            ntails--proxy-password (alist-get 'password data))
+            ntails--effective-settings (alist-get 'effective data))
       (ntails--sync-proxy-auth))))
 
-(defun ntails-get-settings (&optional callback)
-  "Request ntailsd's current proxy settings, refreshing `ntails--settings'.
+(defun ntails--cache-password (res)
+  "Store RES's `password' if RES is ok."
+  (when (eq (alist-get 'ok res) t)
+    (setq ntails--proxy-password
+          (alist-get 'password (alist-get 'data res)))
+    (ntails--sync-proxy-auth)))
+
+(defun ntails-get-ports (&optional callback)
+  "Request ntailsd's current ports, refreshing `ntails--settings'.
 CALLBACK, if given, is called with the response alist."
-  (ntails-request "get_settings" nil
+  (ntails-request "get_ports" nil
                   (lambda (res)
-                    (ntails--cache-settings res)
+                    (ntails--cache-ports res)
+                    (when callback (funcall callback res)))))
+
+(defun ntails-get-proxy-password (&optional callback)
+  "Request ntailsd's local proxy password, refreshing `ntails--proxy-password'.
+CALLBACK, if given, is called with the response alist."
+  (ntails-request "get_proxy_password" nil
+                  (lambda (res)
+                    (ntails--cache-password res)
                     (when callback (funcall callback res)))))
 
 (defun ntails-login-network (control-url &optional callback)
@@ -349,17 +364,17 @@ CALLBACK, if given, is called with the response alist."
   "Log out of and forget network ID.  CALLBACK gets the response."
   (ntails-request "logout_network" `((id . ,id)) callback))
 
-(defun ntails-save-settings (socks-port pac-port http-port &optional callback)
+(defun ntails-save-ports (socks-port pac-port http-port &optional callback)
   "Set ntailsd's local SOCKS5/PAC/HTTP ports to SOCKS-PORT/PAC-PORT/HTTP-PORT.
 Each is -1 (off), 0 (OS-picked), or 1-65535, per `ProxySettings' in
-docs/rpc-protocol.md; `save_settings' requires all three keys.
+docs/rpc-protocol.md; `save_ports' requires all three keys.
 CALLBACK, if given, is called with the response alist."
-  (ntails-request "save_settings"
+  (ntails-request "save_ports"
                   `((socks . ,socks-port)
                     (pac . ,pac-port)
                     (http . ,http-port))
                   (lambda (res)
-                    (ntails--cache-settings res)
+                    (ntails--cache-ports res)
                     (when callback (funcall callback res)))))
 
 (defun ntails-set-proxy-password (password &optional callback)
@@ -367,7 +382,7 @@ CALLBACK, if given, is called with the response alist."
 CALLBACK, if given, is called with the response alist."
   (ntails-request "set_proxy_password" `((password . ,(or password "")))
                   (lambda (res)
-                    (ntails--cache-settings res)
+                    (ntails--cache-password res)
                     (when callback (funcall callback res)))))
 
 ;;;###autoload
@@ -754,7 +769,7 @@ Any of the three may be `-1' (off) or `0' (let the OS pick)."
      (list (read-number "SOCKS5 port (-1 off, 0 auto): " (funcall current 'socks 1080))
            (read-number "PAC port (-1 off, 0 auto): " (funcall current 'pac 1081))
            (read-number "HTTP proxy port (-1 off, 0 auto): " (funcall current 'http 1082)))))
-  (ntails-save-settings socks pac http #'ntails--network-list-report-error))
+  (ntails-save-ports socks pac http #'ntails--network-list-report-error))
 
 (defun ntails-network-list-set-proxy-password (password)
   "Set ntailsd's local proxy password to PASSWORD (empty to disable)."
@@ -803,7 +818,7 @@ forget one."
       (unless (derived-mode-p 'ntails-network-list-mode)
         (ntails-network-list-mode))
       (ntails-list-networks (lambda (_res) (ntails--network-list-refresh-if-visible)))
-      (ntails-get-settings))
+      (ntails-get-ports))
     (pop-to-buffer buf)))
 
 (provide 'ntails)
