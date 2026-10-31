@@ -49,8 +49,65 @@ jobs:
           name: wintails
           path: dist/*.msi
 
+  ntails-macos:
+    runs-on: xcode-27
+    env:
+      KEYCHAIN: build.keychain-db
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: ntailsd/go.mod
+          cache-dependency-path: ntailsd/go.sum
+      - name: Import Developer ID certificate
+        env:
+          APP_P12: ${{ secrets.DEVELOPER_ID_APPLICATION_P12 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          echo "$APP_P12" | base64 --decode > cert.p12
+          security import cert.p12 -k "$KEYCHAIN" -P "$P12_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          rm cert.p12
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          # Intermediates so the chain validates on a clean runner
+          for ca in DeveloperIDG2CA DeveloperIDCA; do
+            curl -fsSL "https://www.apple.com/certificateauthority/${ca}.cer" -o "${ca}.cer"
+            security import "${ca}.cer" -k "$KEYCHAIN" || true
+            rm "${ca}.cer"
+          done
+          security find-identity -v -p codesigning "$KEYCHAIN"
+      - name: Store notarytool credentials
+        env:
+          NOTARY_KEY: ${{ secrets.NOTARY_API_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          echo "$NOTARY_KEY" > AuthKey.p8
+          xcrun notarytool store-credentials ntails-notary \
+            --key AuthKey.p8 --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" \
+            --keychain "$HOME/Library/Keychains/$KEYCHAIN"
+          rm AuthKey.p8
+      - name: Build, sign, notarize, staple
+        env:
+          DEVELOPER_DIR: /Applications/Xcode_27.1.app
+        run: NOTARY_KEYCHAIN="$HOME/Library/Keychains/$KEYCHAIN" nTails/build-release.sh "$GITHUB_REF_NAME"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ntails-macos
+          path: dist/nTails-*.zip
+      - name: Clean up keychain
+        if: always()
+        run: security delete-keychain "$KEYCHAIN" || true
+
   release:
-    needs: [ntailsd, wintails]
+    needs: [ntailsd, wintails, ntails-macos]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8

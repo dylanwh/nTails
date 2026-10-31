@@ -2,6 +2,7 @@
 xcuserdata/
 /wintails/dist
 /wintails/build
+/nTails/build
 /ntailsd/ntailsd
 .claude/settings.local.json
 ntails.el/*.elc
