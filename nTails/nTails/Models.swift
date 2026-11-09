@@ -57,6 +57,8 @@ struct RPCError: Error, Codable, Hashable, Sendable, LocalizedError {
         case "port_unavailable":
             let target = field.map { " for \($0)" } ?? ""
             return "Port\(target) is already in use by another application."
+        case "invalid_password":
+            return "Proxy password cannot exceed 255 bytes."
         case "storage_failed":
             return "Failed to save configuration to disk."
         case "start_failed":
@@ -239,10 +241,17 @@ struct ProxyStatus: Codable, Hashable, Sendable {
     }
 }
 
+// MARK: - Proxy Password Model (RPC Wire Protocol)
+
+struct ProxyPasswordPayload: Codable, Hashable, Sendable {
+    var password: String
+}
+
 // MARK: - App Settings Model
 
 struct Settings: Hashable, Sendable {
     var proxyStatus: ProxyStatus
+    var proxyPassword: String
     var updateSshConfig: Bool
     var sshConfigPath: String
 
@@ -276,6 +285,33 @@ struct Settings: Hashable, Sendable {
         set { proxyStatus.requested.http = newValue }
     }
 
+    var effectivePacUrl: String? {
+        guard effective.pac > 0 else { return nil }
+        return "http://127.0.0.1:\(effective.pac)/proxy.pac"
+    }
+
+    var effectiveSocksUrl: String? {
+        guard effective.socks > 0 else { return nil }
+        if let auth = proxyAuthPrefix {
+            return "socks5://\(auth)@127.0.0.1:\(effective.socks)"
+        }
+        return "socks5://127.0.0.1:\(effective.socks)"
+    }
+
+    var effectiveHttpUrl: String? {
+        guard effective.http > 0 else { return nil }
+        if let auth = proxyAuthPrefix {
+            return "http://\(auth)@127.0.0.1:\(effective.http)"
+        }
+        return "http://127.0.0.1:\(effective.http)"
+    }
+
+    private var proxyAuthPrefix: String? {
+        guard !proxyPassword.isEmpty else { return nil }
+        let encoded = proxyPassword.addingPercentEncoding(withAllowedCharacters: .urlPasswordAllowed) ?? proxyPassword
+        return "ntails:\(encoded)"
+    }
+
     static var defaultSSHConfigPath: String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return (home as NSString).appendingPathComponent(".ssh/config")
@@ -283,16 +319,19 @@ struct Settings: Hashable, Sendable {
 
     static let `default` = Settings(
         proxyStatus: .default,
+        proxyPassword: "",
         updateSshConfig: true,
         sshConfigPath: defaultSSHConfigPath
     )
 
     init(
         proxyStatus: ProxyStatus = .default,
+        proxyPassword: String = "",
         updateSshConfig: Bool = true,
         sshConfigPath: String = Settings.defaultSSHConfigPath
     ) {
         self.proxyStatus = proxyStatus
+        self.proxyPassword = proxyPassword
         self.updateSshConfig = updateSshConfig
         self.sshConfigPath = sshConfigPath
     }
@@ -300,10 +339,12 @@ struct Settings: Hashable, Sendable {
     init(
         proxy: ProxySettings,
         effective: ProxySettings? = nil,
+        proxyPassword: String = "",
         updateSshConfig: Bool = true,
         sshConfigPath: String = Settings.defaultSSHConfigPath
     ) {
         self.proxyStatus = ProxyStatus(requested: proxy, effective: effective ?? proxy)
+        self.proxyPassword = proxyPassword
         self.updateSshConfig = updateSshConfig
         self.sshConfigPath = sshConfigPath
     }
@@ -312,11 +353,13 @@ struct Settings: Hashable, Sendable {
         socks: Int,
         pac: Int,
         http: Int = 1082,
+        proxyPassword: String = "",
         updateSshConfig: Bool = true,
         sshConfigPath: String = Settings.defaultSSHConfigPath
     ) {
         let proxy = ProxySettings(socks: socks, pac: pac, http: http)
         self.proxyStatus = ProxyStatus(requested: proxy, effective: proxy)
+        self.proxyPassword = proxyPassword
         self.updateSshConfig = updateSshConfig
         self.sshConfigPath = sshConfigPath
     }

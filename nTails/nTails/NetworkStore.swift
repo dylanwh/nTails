@@ -64,10 +64,12 @@ final class NetworkStore {
         do {
             async let fetchedNetworks = rpcService.listNetworks()
             async let fetchedSettings = rpcService.getPorts()
-            let (nets, proxyStatus) = try await (fetchedNetworks, fetchedSettings)
+            async let fetchedPassword = rpcService.getProxyPassword()
+            let (nets, proxyStatus, proxyPassword) = try await (fetchedNetworks, fetchedSettings, fetchedPassword)
             let sshManager = SSHConfigManager.shared
             self.settings = Settings(
                 proxyStatus: proxyStatus,
+                proxyPassword: proxyPassword,
                 updateSshConfig: sshManager.autoUpdate,
                 sshConfigPath: sshManager.savedPath
             )
@@ -317,12 +319,20 @@ final class NetworkStore {
         guard let rpcService else { return }
 
         Task {
+            var updatedSettings = previous
+            updatedSettings.updateSshConfig = newSettings.updateSshConfig
+            updatedSettings.sshConfigPath = newSettings.sshConfigPath
             do {
                 let status = try await rpcService.savePorts(newSettings.proxy)
-                self.settings.proxyStatus = status
+                updatedSettings.proxyStatus = status
                 self.invalidConfigErrors.removeAll()
+                if newSettings.proxyPassword != previous.proxyPassword {
+                    let savedPassword = try await rpcService.setProxyPassword(newSettings.proxyPassword)
+                    updatedSettings.proxyPassword = savedPassword
+                }
+                self.settings = updatedSettings
             } catch {
-                self.settings = previous
+                self.settings = updatedSettings
                 self.errorMessage = "Failed to save settings: \(error.localizedDescription)"
             }
         }

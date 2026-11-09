@@ -95,9 +95,8 @@ struct MenuBarView: View {
 
             Menu("Proxy Configuration") {
                 let effectivePac = store.settings.effective.pac
-                if effectivePac > 0 {
+                if let url = store.settings.effectivePacUrl {
                     Button("Copy PAC URL (\(String(effectivePac)))") {
-                        let url = "http://127.0.0.1:\(effectivePac)/proxy.pac"
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(url, forType: .string)
                     }
@@ -107,9 +106,8 @@ struct MenuBarView: View {
                 }
 
                 let effectiveSocks = store.settings.effective.socks
-                if effectiveSocks > 0 {
+                if let url = store.settings.effectiveSocksUrl {
                     Button("Copy SOCKS5 URL (\(String(effectiveSocks)))") {
-                        let url = "socks5://127.0.0.1:\(effectiveSocks)"
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(url, forType: .string)
                     }
@@ -119,9 +117,8 @@ struct MenuBarView: View {
                 }
 
                 let effectiveHttp = store.settings.effective.http
-                if effectiveHttp > 0 {
+                if let url = store.settings.effectiveHttpUrl {
                     Button("Copy HTTP Proxy URL (\(String(effectiveHttp)))") {
-                        let url = "http://127.0.0.1:\(effectiveHttp)"
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(url, forType: .string)
                     }

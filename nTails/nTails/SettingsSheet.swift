@@ -27,6 +27,11 @@ struct SettingsSheet: View {
     @State private var httpEnabled: Bool
     @State private var httpText: String
 
+    // Proxy Password
+    @State private var passwordEnabled: Bool
+    @State private var passwordText: String
+    @State private var showPassword: Bool = false
+
     @State private var updateSshConfig: Bool
     @State private var sshConfigPath: String
     @State private var validationError: String? = nil
@@ -47,6 +52,10 @@ struct SettingsSheet: View {
         let reqHttp = currentSettings.requested.http
         _httpEnabled = State(initialValue: reqHttp != -1)
         _httpText = State(initialValue: reqHttp > 0 ? String(reqHttp) : (reqHttp == 0 ? "" : "1082"))
+
+        let currentPassword = currentSettings.proxyPassword
+        _passwordEnabled = State(initialValue: !currentPassword.isEmpty)
+        _passwordText = State(initialValue: currentPassword)
 
         _updateSshConfig = State(initialValue: currentSettings.updateSshConfig)
         _sshConfigPath = State(initialValue: currentSettings.sshConfigPath)
@@ -124,6 +133,10 @@ struct SettingsSheet: View {
                     httpEnabled = true
                     httpText = "1082"
 
+                    passwordEnabled = false
+                    passwordText = ""
+                    showPassword = false
+
                     updateSshConfig = true
                     sshConfigPath = Settings.defaultSSHConfigPath
                     validationError = nil
@@ -148,7 +161,7 @@ struct SettingsSheet: View {
             .padding(.horizontal, 24)
             .padding(.vertical, 16)
         }
-        .frame(width: 540, height: 480)
+        .frame(width: 540, height: 550)
     }
 
     @ViewBuilder
@@ -199,7 +212,7 @@ struct SettingsSheet: View {
                     portText: $pacText,
                     effectivePort: currentSettings.effective.pac,
                     requestedPort: currentSettings.requested.pac,
-                    copyUrl: currentSettings.effective.pac > 0 ? "http://127.0.0.1:\(currentSettings.effective.pac)/proxy.pac" : nil,
+                    copyUrl: currentSettings.effectivePacUrl,
                     tooltip: "Serves a proxy auto-configuration (PAC) script to automatically route tailnet domains."
                 )
 
@@ -209,7 +222,7 @@ struct SettingsSheet: View {
                     portText: $socksText,
                     effectivePort: currentSettings.effective.socks,
                     requestedPort: currentSettings.requested.socks,
-                    copyUrl: currentSettings.effective.socks > 0 ? "socks5://127.0.0.1:\(currentSettings.effective.socks)" : nil,
+                    copyUrl: currentSettings.effectiveSocksUrl,
                     tooltip: "Local SOCKS5 proxy listener that routes connections to your active tailnets."
                 )
 
@@ -219,7 +232,7 @@ struct SettingsSheet: View {
                     portText: $httpText,
                     effectivePort: currentSettings.effective.http,
                     requestedPort: currentSettings.requested.http,
-                    copyUrl: currentSettings.effective.http > 0 ? "http://127.0.0.1:\(currentSettings.effective.http)" : nil,
+                    copyUrl: currentSettings.effectiveHttpUrl,
                     tooltip: "Local HTTP CONNECT proxy listener for applications that only support HTTP proxies."
                 )
             }
@@ -227,6 +240,50 @@ struct SettingsSheet: View {
             Text("Leave port empty for macOS to assign an available port automatically.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            Divider()
+                .padding(.vertical, 2)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 12) {
+                    Toggle("Require Password", isOn: $passwordEnabled)
+                        .toggleStyle(.checkbox)
+                        .frame(width: 140, alignment: .leading)
+                        .help("Require username and password authentication for SOCKS5 and HTTP proxies.")
+
+                    HStack(spacing: 6) {
+                        Group {
+                            if showPassword {
+                                TextField("Password", text: $passwordText)
+                            } else {
+                                SecureField("Password", text: $passwordText)
+                            }
+                        }
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(!passwordEnabled)
+                        .help("Shared password for SOCKS5 and HTTP proxies (max 255 bytes).")
+
+                        Button {
+                            showPassword.toggle()
+                        } label: {
+                            Image(systemName: showPassword ? "eye.slash" : "eye")
+                                .foregroundStyle(.secondary)
+                                .frame(width: 16, height: 16)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!passwordEnabled)
+                        .help(showPassword ? "Hide password" : "Show password")
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Color(NSColor.controlBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                Text("Applies to SOCKS5 and HTTP proxies with username \"ntails\". PAC never requires authentication.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -441,6 +498,23 @@ struct SettingsSheet: View {
             return
         }
 
+        let resolvedPassword: String
+        if !passwordEnabled {
+            resolvedPassword = ""
+        } else {
+            if passwordText.isEmpty {
+                selectedTab = .listeners
+                validationError = "Proxy password cannot be empty when password authentication is enabled."
+                return
+            }
+            if passwordText.utf8.count > 255 {
+                selectedTab = .listeners
+                validationError = "Proxy password cannot exceed 255 bytes."
+                return
+            }
+            resolvedPassword = passwordText
+        }
+
         validationError = nil
 
         let updatedProxy = ProxySettings(
@@ -452,6 +526,7 @@ struct SettingsSheet: View {
         let newSettings = Settings(
             proxy: updatedProxy,
             effective: currentSettings.effective,
+            proxyPassword: resolvedPassword,
             updateSshConfig: updateSshConfig,
             sshConfigPath: sshConfigPath.trimmingCharacters(in: .whitespacesAndNewlines)
         )

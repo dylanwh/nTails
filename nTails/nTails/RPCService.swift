@@ -328,6 +328,12 @@ final class RPCService {
         return try JSONDecoder().decode(ProxyStatus.self, from: data)
     }
 
+    func getProxyPassword() async throws -> String {
+        let data = try await sendCommand(cmd: "get_proxy_password", args: nil)
+        let payload = try JSONDecoder().decode(ProxyPasswordPayload.self, from: data)
+        return payload.password
+    }
+
     /// Creates a new tailnet entry and immediately begins connecting.
     func loginNetwork(controlUrl: String) async throws -> Network {
         let args = ["controlUrl": controlUrl]
@@ -360,6 +366,13 @@ final class RPCService {
         }
         let resData = try await sendCommand(cmd: "save_ports", args: argsObj)
         return try JSONDecoder().decode(ProxyStatus.self, from: resData)
+    }
+
+    func setProxyPassword(_ password: String) async throws -> String {
+        let args = ["password": password]
+        let resData = try await sendCommand(cmd: "set_proxy_password", args: args)
+        let payload = try JSONDecoder().decode(ProxyPasswordPayload.self, from: resData)
+        return payload.password
     }
 
     // MARK: - Low-level Wire Transport
