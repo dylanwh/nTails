@@ -46,19 +46,11 @@ Host *.your-tailnet.ts.net
 After that, `ssh host.your-tailnet.ts.net` goes over the tailnet with no other
 changes.
 
-## Parts
+### Architecture
 
-Everything is driven by one backend, `ntailsd`, which the frontends run as a
-subprocess and talk to over a small JSON protocol
-([rpc-protocol.md](https://github.com/dylanwh/nTails/blob/main/docs/rpc-protocol.md)).
-
-| Directory    | What it is                                                        |
-|--------------|-------------------------------------------------------------------|
-| `ntailsd/`   | The Go backend. Runs the tailnets, the proxies, and `connect`.    |
-| `ntails.el/` | A native Elisp client for GNU Emacs. `M-x ntails-network-list`.   |
-| `nTails/`    | A native SwiftUI app for the Apple Macintosh.                     |
-| `wintails/`  | A native Win32 app for Microsoft Windows.                         |
-| `docs/`      | The website and the RPC protocol spec.                            |
+Everything is driven by `ntailsd`, a headless Go daemon that manages the tailnets
+and proxies. Frontends launch `ntailsd` as a subprocess and communicate with it
+over a line-delimited [JSON-RPC protocol](https://github.com/dylanwh/nTails/blob/main/docs/rpc-protocol.md).
 
 ## Install
 
@@ -133,6 +125,14 @@ ci/build-release.sh v0.0.0-local   # ntailsd archives for every platform, into d
 `ntailsd` is pure Go with no cgo, so one machine cross-compiles all of it.
 wintails cross-compiles too, from `wintails/shell.nix`. The macOS app needs
 Xcode; see `nTails/`.
+
+### Repository layout
+
+- `ntailsd/` – Go daemon (`tsnet`, HTTP/SOCKS5/PAC proxies, SSH `connect`)
+- `nTails/` – Native macOS SwiftUI app
+- `wintails/` – Native Windows Win32/C++ app
+- `ntails.el/` – Native GNU Emacs package
+- `docs/` – Website and RPC wire protocol specification
 
 ## Disclaimer
 
