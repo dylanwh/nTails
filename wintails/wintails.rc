@@ -1,2 +1,8 @@
 // 1 = CREATEPROCESS_MANIFEST_RESOURCE_ID, 24 = RT_MANIFEST.
 1 24 "wintails.manifest"
+
+// Icons
+1 ICON "wintails.ico"
+2 ICON "tray_connected.ico"
+3 ICON "tray_connecting.ico"
+4 ICON "tray_disconnected.ico"

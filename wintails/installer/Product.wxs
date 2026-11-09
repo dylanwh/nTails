@@ -23,6 +23,9 @@
                   DowngradeErrorMessage="A newer version of winTails is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
+    <Icon Id="WintailsExeIcon" SourceFile="$(var.DistDir)/wintails.exe" />
+    <Property Id="ARPPRODUCTICON" Value="WintailsExeIcon" />
+
     <Feature Id="ProductFeature" Title="winTails" Level="1">
       <ComponentGroupRef Id="ProductComponents" />
       <ComponentRef Id="StartMenuShortcut" />

@@ -26,7 +26,8 @@ foreach lib : ['comctl32', 'comdlg32', 'wininet', 'shell32', 'advapi32']
 endforeach
 
 resources = windows.compile_resources('wintails.rc',
-  depend_files: 'wintails.manifest',
+  depend_files: ['wintails.manifest', 'wintails.ico', 'tray_connected.ico',
+                 'tray_connecting.ico', 'tray_disconnected.ico'],
   include_directories: include_directories('.'))
 
 wintails = executable('wintails',

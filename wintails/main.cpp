@@ -52,6 +52,10 @@ constexpr int kBottomBarHeight = 44;
 constexpr int kSummaryBarHeight = 24;
 constexpr int kStatusBarHeight = 22;
 constexpr UINT kTrayIconId = 1;
+constexpr WORD IDI_APP = 1;
+constexpr WORD IDI_TRAY_CONNECTED = 2;
+constexpr WORD IDI_TRAY_CONNECTING = 3;
+constexpr WORD IDI_TRAY_DISCONNECTED = 4;
 constexpr int kTrayShowMenuCmdId = 3001;
 constexpr int kTrayQuitMenuCmdId = 3002;
 constexpr int kStatusColumnWidth = 150;
@@ -208,6 +212,8 @@ class MainWindow {
 
     void AddTrayIcon();
     void RemoveTrayIcon();
+    void UpdateTrayIcon();
+    HICON GetTrayIcon() const;
     void OnTrayIconMessage(LPARAM lParam);
     void ShowTrayBalloon(const std::string &title, const std::string &body);
 
@@ -223,6 +229,7 @@ class MainWindow {
     HWND addButton_ = nullptr;
     HWND settingsButton_ = nullptr;
     HWND statusBar_ = nullptr;
+    HINSTANCE instance_ = nullptr;
     bool trayIconAdded_ = false;
     bool appsSetupPosted_ = false; // at most once per run, even before it's marked seen
     RpcClient rpc_;
@@ -897,10 +904,46 @@ void MainWindow::AddTrayIcon() {
     nid.uID = kTrayIconId;
     nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     nid.uCallbackMessage = WM_APP_TRAYICON;
-    // TODO: real icon.
-    nid.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    nid.hIcon = GetTrayIcon();
     wcsncpy_s(nid.szTip, L"winTails", _TRUNCATE);
     trayIconAdded_ = Shell_NotifyIconW(NIM_ADD, &nid) != FALSE;
+}
+
+void MainWindow::UpdateTrayIcon() {
+    if (!trayIconAdded_)
+        return;
+    NOTIFYICONDATAW nid{};
+    nid.cbSize = sizeof(nid);
+    nid.hWnd = hwnd_;
+    nid.uID = kTrayIconId;
+    nid.uFlags = NIF_ICON;
+    nid.hIcon = GetTrayIcon();
+    Shell_NotifyIconW(NIM_MODIFY, &nid);
+}
+
+HICON MainWindow::GetTrayIcon() const {
+    WORD iconId = IDI_TRAY_DISCONNECTED;
+    bool hasConnecting = false;
+    bool hasConnected = false;
+    for (const auto &[id, info] : networks_) {
+        if (info.status == "connecting" || info.status == "waiting for login") {
+            hasConnecting = true;
+            break;
+        }
+        if (info.status == "connected") {
+            hasConnected = true;
+        }
+    }
+    if (hasConnecting)
+        iconId = IDI_TRAY_CONNECTING;
+    else if (hasConnected)
+        iconId = IDI_TRAY_CONNECTED;
+
+    int cx = GetSystemMetrics(SM_CXSMICON);
+    int cy = GetSystemMetrics(SM_CYSMICON);
+    return reinterpret_cast<HICON>(
+        LoadImageW(instance_, MAKEINTRESOURCEW(iconId), IMAGE_ICON, cx, cy,
+                   LR_SHARED));
 }
 
 void MainWindow::RemoveTrayIcon() {
@@ -1058,6 +1101,7 @@ void MainWindow::UpdateSummaryLabel() {
     std::wstring text = std::to_wstring(connected) + L" connected - " +
                         std::to_wstring(disconnected) + L" disconnected";
     SetWindowTextW(summaryLabel_, text.c_str());
+    UpdateTrayIcon();
 }
 
 void MainWindow::UpdateEmptyState() {
@@ -1088,10 +1132,12 @@ LRESULT MainWindow::OnListCustomDraw(NMLVCUSTOMDRAW *cd) {
 }
 
 bool MainWindow::Create(HINSTANCE instance) {
+    instance_ = instance;
     WNDCLASSW wc{};
     wc.lpfnWndProc = WndProcStatic;
     wc.hInstance = instance;
     wc.lpszClassName = L"WintailsMainWindow";
+    wc.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_APP));
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
     RegisterClassW(&wc);
@@ -1099,7 +1145,13 @@ bool MainWindow::Create(HINSTANCE instance) {
     hwnd_ = CreateWindowExW(0, wc.lpszClassName, L"winTails",
                             WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
                             600, 560, nullptr, nullptr, instance, this);
-    return hwnd_ != nullptr;
+    if (!hwnd_)
+        return false;
+
+    HICON appIcon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_APP));
+    SendMessageW(hwnd_, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(appIcon));
+    SendMessageW(hwnd_, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(appIcon));
+    return true;
 }
 
 } // namespace
