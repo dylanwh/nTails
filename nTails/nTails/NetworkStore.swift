@@ -44,6 +44,22 @@ final class NetworkStore {
         })).sorted()
     }
 
+    var connectionState: NTailsConnectionState {
+        if isLoading {
+            return .connecting
+        }
+        guard isBackendConnected else {
+            return .disconnected
+        }
+        if networks.contains(where: { $0.isConnecting }) {
+            return .connecting
+        }
+        if networks.contains(where: { $0.isConnected }) {
+            return .connected
+        }
+        return .disconnected
+    }
+
     func handleInvalidConfig(_ error: RPCError) {
         if !invalidConfigErrors.contains(where: { $0.field == error.field }) {
             invalidConfigErrors.append(error)

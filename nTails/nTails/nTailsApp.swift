@@ -37,8 +37,11 @@ struct nTailsApp: App {
         }
         .windowResizability(.contentMinSize)
 
-        MenuBarExtra("nTails", systemImage: "point.3.filled.connected.trianglepath.dotted") {
+        MenuBarExtra {
             MenuBarView(store: store)
+        } label: {
+            store.connectionState.menuBarImage
+                .accessibilityLabel("nTails (\(store.connectionState.rawValue))")
         }
     }
 }

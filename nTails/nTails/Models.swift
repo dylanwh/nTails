@@ -167,6 +167,10 @@ struct Network: Identifiable, Codable, Hashable, Sendable {
         statusState == .disconnected
     }
 
+    var isConnecting: Bool {
+        statusState == .connecting || statusState == .waitingForLogin
+    }
+
     var isError: Bool {
         if case .error = statusState { return true }
         return false
